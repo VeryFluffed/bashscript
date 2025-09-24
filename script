@@ -1,0 +1,713 @@
+#!/bin/bash
+## BIG BETA SCRIPT TIME
+
+# Display all functions
+display_function() {
+    echo -e "Which function would you like to run?:\n\n"
+    echo "1) manage_packages"
+    echo "2) security_policies"
+    echo "3) configure_networking"
+    echo "4) configure_openssh_server"
+    echo "5) configure_mysql_server"
+    echo "6) configure_apache_server"
+    echo "7) audit_cron"
+    echo "8) manage_kernel"
+    echo "9) miscellaneous_security"
+    read -p "Enter your choice: " choice
+    case "$choice" in
+        1) manage_packages ;;
+        2) security_policies ;;
+        3) configure_networking ;;
+        4) configure_openssh_server ;;
+        5) configure_mysql_server ;;
+        6) configure_apache_server ;;
+        7) audit_cron ;;
+        8) manage_kernel ;;
+        9) miscellaneous_security ;;
+        *) echo "Invalid choice." ;;
+    esac
+}
+
+# Call display_function to show the available options
+display_function
+
+# Function to manage packages
+manage_packages() {
+    echo "Starting package management tasks..."
+
+    # Updates
+    echo "Updating the system..."
+    sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y
+    echo "System updates complete."
+
+    # Check sources list
+    echo "Checking sources list for suspicious entries..."
+    gedit /etc/apt/sources.list
+    gedit /etc/apt/sources.list.d/
+    echo "Please manually review and remove any suspicious entries."
+
+    # Install auditing software
+    echo "Installing auditing packages..."
+    sudo apt install apt-listbugs -y
+    sudo apt install apt-listchanges -y
+    echo "Auditing packages installed."
+
+    # List installed packages
+    echo "Listing installed packages..."
+    sudo apt list --installed | cut -d/ -f1 > installed_packages.txt
+    echo "Installed packages saved to installed_packages.txt. Review for unauthorized software."
+
+    # Remove unauthorized packages
+    echo "Removing unauthorized packages..."
+    UNAUTHORIZED_PACKAGES="ssh ftp telnet openssh-* samba-* *-samba smbd telnet avahi-* cups cups-* *-cups slapd ldap-utils nfs-common nfs-kernel-server rsync talk"
+    for package in $UNAUTHORIZED_PACKAGES; do
+        if dpkg -l | grep -q "^ii.*$package"; then
+            echo "Removing $package..."
+            sudo apt purge -y "$package"
+        fi
+    done
+    echo "Unauthorized packages removed."
+
+    # Clean up
+    echo "Cleaning up unused packages..."
+    sudo apt autoremove -y
+    sudo apt clean
+    echo "Package management tasks complete."
+}
+
+# Function to configure security policies
+security_policies() {
+    echo "Starting security policy configuration..."
+
+    # Remove media files, backdoors, PII files, etc.
+    echo "Searching for media files, backdoors, and PII files..."
+    ls -alR /home/*/*
+
+    # Install security packages
+    echo "Installing security packages..."
+    sudo apt install libpam-cracklib -y
+    sudo apt install libpam-tmpdin -y
+    sudo apt install libpam-usb -y
+    sudo apt install auditd -y
+    sudo apt install libpam-pwquality -y
+    echo "Security packages installed."
+
+    # Password policy
+    echo "Securing common-password file..."
+    sudo gedit /etc/pam.d/common-password <<EOF
+auth    required    pam_cracklib.so reject_username enforce_for_root maxclassrepeat=5 maxsequence=5 dcredit=-1 ocredit=-1 lcredit=-1 ucredit=-1 minlen=16 difok=5 retry=3
+auth    required    pam_unix.so sha512 use_authtok remember=5
+password requisite    pam_pwquality.so retry=3
+password [success=1 default=ignore] pam_unix.so sha512
+password required    pam_pwhistory.so remember=5
+EOF
+
+    # Set password expiration policies
+    echo "Setting password expiration and login definitions..."
+    sudo gedit /etc/login.defs <<EOF
+PASS_MAX_DAYS 90
+PASS_MIN_DAYS 10
+PASS_WARN_AGE 7
+umask 027
+EOF
+
+    # Secure pwquality.conf file
+    echo "Securing pwquality.conf file..."
+    sudo gedit /etc/security/pwquality.conf <<EOF
+minlen = 16
+dcredit = -1
+ucredit = -1
+ocredit = -1
+lcredit = -1
+try_first_pass
+EOF
+
+    # Set default inactivity to 30 days
+    echo "Setting default inactivity to 30 days..."
+    sudo useradd -D -f 30
+
+    # Set inactivity for each user
+    echo "Setting inactivity for each user..."
+    for user in $(awk -F: '($3 >= 1000 && $1 != "nfsnobody") { print $1 }' /etc/passwd); do
+        sudo chage --inactive 30 $user
+    done
+
+    # Lock system users
+    echo "Locking system users..."
+    for user in $(awk -F: '($3 < 1000) {print $1 }' /etc/passwd); do
+        if [ $user != "root" ]; then
+            sudo usermod -L $user
+            if [ $user != "sync" ] && [ $user != "shutdown" ] && [ $user != "halt" ]; then
+                sudo usermod -s /usr/sbin/nologin $user
+            fi
+        fi
+    done
+
+    # Audit policy
+    echo "Securing audit.rules file..."
+    sudo gedit /etc/audit/audit.rules <<EOF
+-D
+-w / -p rwax -k filesystem_change
+-a always,exit -S all
+-e 2
+EOF
+
+    # Secure auditd.conf file
+    echo "Securing auditd.conf file..."
+    sudo gedit /etc/audit/auditd.conf <<EOF
+max_log_file_action=keep_log
+EOF
+
+    # Account lockout policy
+    echo "Securing common-auth file for account lockout..."
+    sudo gedit /etc/pam.d/common-auth <<EOF
+auth    required    pam_tally2.so deny=5 onerr=fail audit even_deny_root lock_time=1200 unlock_time=1800
+EOF
+
+    # Secure bash, profile, and related files
+    echo "Securing /etc/bash.bashrc, /etc/profile, and related files..."
+    sudo gedit /etc/bash.bashrc <<EOF
+TMOUT=600
+umask 027
+EOF
+
+    # Disable USB access
+    echo "Disabling USB storage..."
+    sudo service autofs stop
+    sudo systemctl disable autofs
+    sudo apt install usb-storage -y
+    sudo apt install USBGuard -y
+    sudo systemctl enable usbguard
+    echo "USB storage disabled."
+
+    # Lock unauthorized users
+    echo "Locking unauthorized users..."
+    sudo chown root:root /etc/passwd
+    sudo chmod 644 /etc/passwd
+    sudo chown root:root /etc/shadow
+    sudo chmod o-rwx,g-wx /etc/shadow
+    sudo chown root:root /etc/group
+    sudo chmod 644 /etc/group
+    sudo chown root:shadow /etc/gshadow
+    sudo chmod o-rwx,g-rw /etc/gshadow
+    sudo chown root:root /etc/passwd-
+    sudo chmod u-x,go-wx /etc/passwd-
+    sudo chown root:root /etc/shadow-
+    sudo chown root:shadow /etc/shadow-
+    sudo chmod o-rwx,g-rw /etc/shadow-
+    sudo chown root:root /etc/group-
+    sudo chmod u-x,go-wx /etc/group-
+    sudo chown root:root /etc/gshadow-
+    sudo chown root:shadow /etc/gshadow-
+    sudo chmod o-rwx,g-rw /etc/gshadow-
+    echo "Unauthorized users locked."
+
+    # Lock root account
+    echo "Locking the root account..."
+    sudo usermod -s /bin/false root
+    sudo usermod -L root
+    sudo usermod -g 0 root
+
+    # Lock root to physical consoles
+    echo "Securing root access to physical consoles..."
+    sudo gedit /etc/securetty
+    echo "Remove entries for any consoles that are not in a physically secure location."
+
+    # Secure lightdm and gdm configuration
+    echo "Securing display manager configurations..."
+    sudo gedit /etc/lightdm/lightdm.conf <<EOF
+allow-guest=false
+autologin-user=
+EOF
+    sudo gedit /etc/gdm/custom.conf <<EOF
+AutomaticLoginEnable=false
+AutomaticLogin=
+EOF
+    sudo gedit /etc/pam.d/gdm-password <<EOF
+auth sufficient pam_succeed_if.so user ingroup nopasswdlogin
+EOF
+
+    # Create groups and configure sudo
+    echo "Configuring groups and sudo access..."
+    # Example group creation and deletion
+    sudo groupadd sudoers
+    sudo groupdel unauthorized_group
+    sudo usermod -aG sudoers username
+
+    # Configure sudo permissions
+    sudo visudo <<EOF
+Defaults    requiretty
+Defaults    use_pty
+Defaults    lecture="always"
+Defaults    log_input,log_output
+Defaults    passwd_tries=3
+Defaults    passwd_timeout=1
+EOF
+
+    # Securing /etc/pam.d/su for sudo access
+    sudo gedit /etc/pam.d/su <<EOF
+auth required pam_wheel.so
+EOF
+
+    echo "Security policy configuration complete."
+}
+
+# Function to configure networking security
+configure_networking() {
+    echo "Starting networking configuration..."
+
+    # Install and configure firewall
+    echo "Installing and configuring firewall..."
+    sudo apt install ufw iptables -y
+    sudo ufw enable
+    sudo ufw default deny incoming
+    sudo ufw logging verbose
+    echo "Firewall configured."
+
+    # Edit /etc/default/ufw for IPV6 setting
+    echo "Configuring /etc/default/ufw for IPV6..."
+    sudo gedit /etc/default/ufw <<EOF
+IPV6=yes
+EOF
+    echo "/etc/default/ufw configured for IPV6."
+
+    # Allow or deny connections for critical services or backdoors
+    echo "Configuring firewall rules for critical services or backdoors..."
+    sudo ufw allow [program/port/ip address]  # Replace [program/port/ip address] with the actual values
+    sudo ufw deny [program/port/ip address]    # Replace [program/port/ip address] with the actual values
+    echo "Firewall rules applied."
+
+    # Check for backdoors
+    echo "Checking for backdoors..."
+    sudo apt install nmap -y
+    sudo nmap -sVf -p- 127.0.0.1
+    sudo apt purge nmap -y
+    sudo lsof -i -n -p
+    sudo netstat -tulpn
+    echo "Backdoor checks completed."
+
+    # DNS configuration
+    echo "Cleaning up DNS configuration..."
+    sudo gedit /etc/hosts <<EOF
+# Remove non-default entries in /etc/hosts as needed.
+EOF
+    echo "DNS configuration cleaned."
+
+    # Configure /etc/hosts.allow and /etc/hosts.deny
+    echo "Configuring /etc/hosts.allow and /etc/hosts.deny..."
+    sudo gedit /etc/hosts.allow <<EOF
+# Review and remove suspicious entries in /etc/hosts.allow.
+EOF
+    sudo gedit /etc/hosts.deny <<EOF
+ALL: ALL
+EOF
+    echo "/etc/hosts.allow and /etc/hosts.deny configured."
+
+    echo "Networking configuration complete."
+}
+
+# Function to configure OpenSSH server
+configure_openssh_server() {
+    echo "Starting OpenSSH server configuration..."
+
+    # Install OpenSSH server
+    echo "Installing OpenSSH server..."
+    sudo apt install openssh-server -y
+    sudo service ssh enable
+    sudo service ssh start
+    echo "OpenSSH server installed and started."
+
+    # Set proper permissions on the sshd_config file
+    echo "Configuring permissions for /etc/ssh/sshd_config..."
+    sudo chown root:root /etc/ssh/sshd_config
+    sudo chmod og-rwx /etc/ssh/sshd_config
+    echo "Permissions set for sshd_config."
+
+    # Secure the sshd_config file
+    echo "Securing /etc/ssh/sshd_config file..."
+    sudo gedit /etc/ssh/sshd_config <<EOF
+# KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+# Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,umac-128@openssh.com
+UsePrivilegeSeparation sandbox
+Subsystem sftp internal-sftp -f AUTHPRIV -l INFO
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+GatewayPorts no
+PermitTunnel no
+UseDNS no
+Compression no
+TCPKeepAlive no
+AllowAgentForwarding no
+PermitRootLogin no
+Port 8808
+ForwardX11 no
+Protocol 2
+LogLevel INFO
+X11Forwarding no
+MaxAuthTries 2
+IgnoreRhosts yes
+HostbasedAuthentication no
+PermitEmptyPasswords no
+PermitUserEnvironment no
+ClientAliveInterval 300
+ClientAliveCountMax 0
+LoginGraceTime 60
+Banner /etc/issue.net
+ListenAddress 0.0.0.0
+MaxSessions 2
+MaxStartups 2
+PasswordAuthentication no
+AllowUsers <userlist>   # Replace with actual usernames
+AllowGroups <grouplist> # Replace with actual groups
+DenyUsers <userlist>    # Replace with actual users
+DenyGroups <grouplist>  # Replace with actual groups
+EOF
+    echo "sshd_config secured."
+
+    # Restart SSH service and test configuration
+    echo "Restarting SSH service and testing configuration..."
+    sudo service sshd restart
+    sudo sshd -T
+
+    # Open the configured SSH port in firewall
+    echo "Allowing SSH port 8808 through firewall..."
+    sudo ufw allow 8808
+    sudo systemctl reload sshd
+
+    echo "OpenSSH server configuration complete."
+}
+
+# Function to configure MySQL server
+configure_mysql_server() {
+    echo "Starting MySQL server configuration..."
+
+    # Install MySQL server
+    echo "Installing MySQL server..."
+    sudo apt install mysql-server -y
+    echo "MySQL server installed."
+
+    # Run MySQL secure installation
+    echo "Running mysql_secure_installation..."
+    sudo mysql_secure_installation
+
+    # Enable and start MySQL service
+    echo "Enabling and starting MySQL service..."
+    sudo service mysql enable
+    sudo service mysql start
+    echo "MySQL service enabled and started."
+
+    # Secure the mysqld.cnf file
+    echo "Securing mysqld.cnf file..."
+    sudo gedit /etc/mysql/mysql.conf.d/mysqld.cnf <<EOF
+# MySQL configuration for better security and performance
+bind-address = 127.0.0.1
+user = mysql
+port = 1542
+local_infile = 0
+symbolic-links = 0
+default_password_lifetime = 90
+EOF
+    echo "mysqld.cnf file secured."
+
+    # Restart MySQL service
+    echo "Restarting MySQL service..."
+    sudo service mysql restart
+    echo "MySQL service restarted."
+
+    echo "MySQL server configuration complete."
+}
+
+# Function to configure Apache server
+configure_apache_server() {
+    echo "Starting Apache server configuration..."
+
+    # Install Apache server
+    echo "Installing Apache server..."
+    sudo apt install apache2 -y
+    echo "Apache server installed."
+
+    # Start and enable Apache service
+    echo "Starting and enabling Apache service..."
+    sudo service apache2 start
+    sudo service apache2 enable
+    echo "Apache service started and enabled."
+
+    # Allow Apache through the firewall
+    echo "Allowing Apache through the firewall..."
+    sudo ufw allow "Apache Full"
+    echo "Apache allowed through the firewall."
+
+    # Install mod_security for enhanced security
+    echo "Installing mod_security..."
+    sudo apt install libapache2-mod-security2 -y
+    echo "mod_security installed."
+
+    # Enable mod_security configuration
+    echo "Enabling mod_security configuration..."
+    sudo mv /etc/modsecurity/modsecurity.conf-recommended /etc/modsecurity/modsecurity.conf
+    echo "mod_security configuration enabled."
+
+    # Create apache user and group, and secure the directories
+    echo "Creating apache user and group..."
+    sudo useradd -r -s /bin/false apache
+    sudo groupadd apache
+    sudo useradd -G apache apache
+    echo "Apache user and group created."
+
+    # Change ownership and permissions
+    echo "Securing Apache directories..."
+    sudo chown -R apache:apache /opt/apache
+    sudo chmod -R 750 /etc/apache2/*
+    echo "Ownership and permissions updated."
+
+    # Secure Apache configuration
+    echo "Securing Apache configuration..."
+    sudo gedit /etc/apache2/apache2.conf <<EOF
+# Apache configuration for enhanced security
+ServerTokens Prod
+ServerSignature Off
+FileETag None
+User apache
+Group apache
+TraceEnable off
+Timeout 60
+Header always append X-Frame-Options SAMEORIGIN
+Header set X-XSS-Protection "1; mode=block"
+<Directory />
+    Options –Indexes -Includes
+    AllowOverride None
+</Directory>
+<LimitExcept GET POST HEAD>
+    deny from all
+</LimitExcept>
+<Directory /opt/apache/htdocs>
+    Options None
+</Directory>
+<Directory />
+    Options -Indexes
+    AllowOverride None
+</Directory>
+EOF
+    echo "Apache configuration secured."
+
+    # Restart Apache service
+    echo "Restarting Apache service..."
+    sudo service apache2 restart
+    echo "Apache service restarted."
+
+    echo "Apache server configuration complete."
+}
+
+# Function to secure cron jobs
+audit_cron() {
+    echo "Starting audit and securing of unauthorized services..."
+
+    # Enable cron service
+    echo "Enabling cron service..."
+    sudo systemctl enable cron
+    echo "Cron service enabled."
+
+    # Remove deny files for cron and at services
+    echo "Removing cron and at deny files..."
+    sudo rm /etc/cron.deny
+    sudo rm /etc/at.deny
+    echo "Removed cron.deny and at.deny."
+
+    # Create and secure cron.allow and at.allow files
+    echo "Creating cron.allow and at.allow files..."
+    sudo touch /etc/cron.allow
+    sudo touch /etc/at.allow
+    sudo chmod og-rwx /etc/cron.allow
+    sudo chmod og-rwx /etc/at.allow
+    sudo chown root:root /etc/cron.allow
+    sudo chown root:root /etc/at.allow
+    echo "Secured cron.allow and at.allow files."
+
+    # Secure crontab and cron directories
+    echo "Securing crontab and cron directories..."
+    sudo chown root:root /etc/crontab
+    sudo chmod og-rwx /etc/crontab
+    sudo chown root:root /etc/cron.hourly
+    sudo chmod og-rwx /etc/cron.hourly
+    sudo chown root:root /etc/cron.daily
+    sudo chmod og-rwx /etc/cron.daily
+    sudo chown root:root /etc/cron.weekly
+    sudo chmod og-rwx /etc/cron.weekly
+    sudo chown root:root /etc/cron.monthly
+    sudo chmod og-rwx /etc/cron.monthly
+    sudo chown root:root /etc/cron.d
+    sudo chmod og-rwx /etc/cron.d
+    echo "Secured crontab and cron directories."
+
+    echo "Audit and security for unauthorized services completed."
+}
+
+# Function to manage and secure kernel configurations
+manage_kernel() {
+    echo "Starting kernel security management..."
+
+    # Secure sysctl.conf
+    echo "Securing /etc/sysctl.conf..."
+    sudo gedit /etc/sysctl.conf <<EOL
+# Kernel parameters for security
+fs.protected_hardlinks=1
+fs.protected_symlinks=1
+fs.suid_dumpable=0
+kernel.exec-shield=1
+kernel.randomize_va_space=2
+net.ipv4.ip_forward=0
+net.ipv4.conf.all.rp_filter=1
+net.ipv4.conf.all.accept_source_route=0
+net.ipv4.conf.all.send_redirects=0
+net.ipv4.conf.all.log_martians=1
+net.ipv4.conf.all.secure_redirects=0
+net.ipv6.conf.all.accept_ra=0
+net.ipv4.conf.default.secure_redirects=0
+net.ipv4.conf.default.send_redirects=0
+net.ipv4.conf.default.log_martians=1
+net.ipv4.conf.default.rp_filter=1
+net.ipv4.icmp_echo_ignore_broadcasts=1
+net.ipv4.icmp_ignore_bogus_error_messages=1
+net.ipv4.icmp_ignore_bogus_error_responses=1
+net.ipv4.tcp_syncookies=1
+net.ipv6.conf.all.accept_redirects=0
+net.ipv6.conf.all.disable_ipv6 = 1 # Careful! This disables IPv6
+net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.default.accept_redirects=0
+EOL
+    echo "Secured /etc/sysctl.conf."
+
+    # Secure limits.conf
+    echo "Securing /etc/security/limits.conf..."
+    sudo gedit /etc/security/limits.conf <<EOL
+# Set hard core limit to prevent core dumps
+* hard core 0
+EOL
+    echo "Secured /etc/security/limits.conf."
+
+    # Secure CIS.conf
+    echo "Securing /etc/modprobe.d/CIS.conf..."
+    sudo gedit /etc/modprobe.d/CIS.conf <<EOL
+# Disable unused kernel modules
+install dccp /bin/true
+install sctp /bin/true
+install rds /bin/true
+install tipc /bin/true
+EOL
+    echo "Secured /etc/modprobe.d/CIS.conf."
+
+    # Secure host.conf
+    echo "Securing /etc/host.conf..."
+    sudo gedit /etc/host.conf <<EOL
+# Host configuration for DNS and security
+order bind,hosts
+multi on
+nospoof on
+EOL
+    echo "Secured /etc/host.conf."
+
+    # Secure resolv.conf
+    echo "Securing /etc/resolv.conf..."
+    sudo gedit /etc/resolv.conf <<EOL
+# DNS resolver configuration
+nameserver 8.8.8.8
+EOL
+    echo "Secured /etc/resolv.conf."
+
+    # Ensure /etc/rc.local exits properly
+    echo "Securing /etc/rc.local..."
+    sudo gedit /etc/rc.local <<EOL
+# Ensure proper shutdown
+exit 0
+EOL
+    echo "Secured /etc/rc.local."
+
+    echo "Kernel security management completed."
+}
+
+# Function to apply miscellaneous security configurations
+miscellaneous_security() {
+    echo "Starting miscellaneous security configurations..."
+
+    # Secure Postfix - main.cf configuration
+    echo "Securing Postfix main.cf..."
+    sudo gedit /etc/postfix/main.cf <<EOL
+# Ensure Postfix only listens on the loopback interface
+inet_interfaces = loopback-only
+EOL
+    echo "Secured Postfix main.cf."
+
+    # Secure shared memory mounts
+    echo "Securing /dev/shm..."
+    sudo mount -o remount,cnoexec /dev/shm
+    sudo mount -o remount,nosuid /dev/shm
+    sudo mount -o remount,nodev /dev/shm
+    echo "Secured /dev/shm mounts."
+
+    # Secure /etc/fstab for shared memory
+    echo "Securing /etc/fstab..."
+    sudo gedit /etc/fstab <<EOL
+# Remount /run/shm as read-only
+none /run/shm tmpfs defaults,ro 0 0
+EOL
+    echo "Secured /etc/fstab."
+
+    # Find and remove world-writable files
+    echo "Finding world-writable files..."
+    df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -type f -perm -0002
+    echo "Found and listed world-writable files."
+
+    # Find and remove unowned files or directories
+    echo "Finding unowned files or directories..."
+    df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -nouser
+    echo "Found and listed unowned files or directories."
+
+    # Find and remove unowned files or directories (group)
+    echo "Finding unowned files or directories (group)..."
+    df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -nogroup
+    echo "Found and listed unowned files or directories (group)."
+
+    # Find and list SUID executables
+    echo "Finding SUID executables..."
+    df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -type f -perm -4000
+    echo "Found and listed SUID executables."
+
+    # Find and list SGID executables
+    echo "Finding SGID executables..."
+    df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -type f -perm -2000
+    echo "Found and listed SGID executables."
+
+    # Install and enable rsyslog
+    echo "Installing and enabling rsyslog..."
+    sudo apt install rsyslog -y
+    sudo systemctl enable rsyslog
+    echo "Installed and enabled rsyslog."
+
+    # Secure rsyslog configuration
+    echo "Securing /etc/rsyslog.conf..."
+    sudo gedit /etc/rsyslog.conf <<EOL
+# Remove any configurations that send logs to a domain
+EOL
+    echo "Secured /etc/rsyslog.conf."
+
+    # Purge unnecessary inetd services and install necessary ones
+    echo "Purging unnecessary services and installing tcpd and apparmor..."
+    sudo apt purge xinetd openbsd-inetd inetutils-inetd -y
+    sudo apt install tcpd -y
+    sudo apt install apparmor -y
+    sudo aa-enforce /etc/apparmor.d/*
+    echo "Purged unnecessary services and enabled AppArmor."
+
+    # Set appropriate permissions for security files
+    echo "Setting chmod 644 for important security files..."
+    sudo chmod 644 /etc/hosts
+    sudo chmod 644 /etc/hosts.deny
+    sudo chmod 644 /etc/hosts.allow
+    echo "Set chmod 644 for /etc/hosts, /etc/hosts.deny, and /etc/hosts.allow."
+
+    echo "Miscellaneous security configurations completed."
+}
+
+# Call the display_function
+display_function
