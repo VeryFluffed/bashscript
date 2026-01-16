@@ -14,7 +14,7 @@ Here's what you can do:
 
 - **Service Hardening**: Disables unnessesary or insecure services and locks down common attack vectors (FTP, SSH, nginx, etc.)
 
-### 🎯 Achievements & Impact:
+## 🎯 Achievements & Impact:
 
 - Top 100 National Semifinalist — Platinum Tier (2×)<br>
 - Top 1% nationwide among CyberPatriot competitors<br>
@@ -48,22 +48,22 @@ This approach ensured the script was competition-safe, not just technically corr
 
 This project significantly strengthened my Linux security, scripting, and systems thinking skills.
 
-# 🧠 Bash Scripting Under Constraints<br>
+### 🧠 Bash Scripting Under Constraints<br>
 - Learned to write clear, defensive Bash that prioritizes safety and reversibility<br>
 - Balanced automation speed with system integrity
 
-# 🔐 Linux System Hardening<br>
+### 🔐 Linux System Hardening<br>
 - Deepended understasnding of ser privilege models, PAM authentication, password policies, service management, and firewall behavior
 
-# ⚡ Competition-Grade Efficiency<br>
+### ⚡ Competition-Grade Efficiency<br>
 - Optimized workflows for maximum point gain per minute<br>
 - Reduced cognitive load during live rounds by automating repetitive checks
 
-# 🧩 Risk-Aware Automation<br>
+### 🧩 Risk-Aware Automation<br>
 - Learned when not to automate<br>
 - Designed logic that avoids breaking required services or scoring items
 
-# 🚦 Running the Project<br>
+### 🚦 Running the Project<br>
 - Became the team’s go-to Linux specialist<br>
 - Earned trust to run scripts that affected the entire system image
 
