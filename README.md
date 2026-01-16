@@ -63,7 +63,7 @@ This project significantly strengthened my Linux security, scripting, and system
 - Learned when not to automate<br>
 - Designed logic that avoids breaking required services or scoring items
 
-### 🚦 Running the Project<br>
+### 📈 Leadership & Trust<br>
 - Became the team’s go-to Linux specialist<br>
 - Earned trust to run scripts that affected the entire system image
 
